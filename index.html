@@ -1,0 +1,324 @@
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="author" content="André Buhart - F1ATB">
+    <meta name="copyright" content="F1ATB">
+    <title>FFT Routeur - Comparaison</title>
+
+    <style>
+      body {
+        text-align: center;
+        font-size: 150%;
+        background-color: #222;
+        color: white;
+      }
+      .Oscillo {
+        border: 4px grey inset;
+        height: 90px;
+        width: 100%;
+        background-color: black;
+        margin-bottom: 5px;
+        margin-top: 0;
+      }
+      
+      h4 {
+        margin-bottom: 2px;
+        margin-top: 2px;
+      }
+      h4 span {
+        color: #8cf;
+        font-size: 0.5em;
+      }
+      svg {
+        font-size: 14px;
+      }
+      
+      .slider-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 10px auto;
+        max-width: 95%;
+      }
+      
+      .slider-container input[type="range"] {
+        flex: 1;
+        max-width: 70%;
+      }
+      
+      .slider-container button {
+        font-size: 20px;
+        width: 30px;
+        height: 30px;
+        border: 2px solid #666;
+        background: #444;
+        color: white;
+        cursor: pointer;
+        border-radius: 5px;
+      }
+      
+      .slider-container button:hover {
+        background: #666;
+      }
+      
+      .slider-container button:active {
+        background: #888;
+      }
+    </style>
+  </head>
+
+  <body onload="trace();">
+    <h4>Découpe Sinus <span id="trameDecoupe"></span></h4>
+    <div class="Oscillo" id="Decoupe"></div>
+
+    <h4>Demi-Sinus <span id="trameDemi"></span></h4>
+    <div class="Oscillo" id="Demi"></div>
+
+    <h4>Multi-Sinus <span id="trameMulti"></span></h4>
+    <div class="Oscillo" id="Multi"></div>
+
+    <h4>Train de Sinus <span id="trameTrain"></span></h4>
+    <div class="Oscillo" id="Train"></div>
+
+    <div class="slider-container">
+      <button id="btnOuvertureMinus">−</button>
+      <input type="range" min="0" max="100" value="50" oninput="trace();" id="curseurOuverture" step="1">
+      <button id="btnOuverturePlus">+</button>
+    </div>
+    <div><span>Ouverture : </span><span id="percentOuverture">50</span><span> %</span></div>
+
+    <div class="slider-container">
+      <button id="btnDureeMinus">−</button>
+      <input type="range" min="100" max="1000" value="1000" oninput="trace();" id="curseurDuree" step="50">
+      <button id="btnDureePlus">+</button>
+    </div>
+    <div><span>Durée : </span><span id="valueDuree">1000</span><span> ms</span></div>
+
+    <script>
+      // Tables pour le mode multi-sinus
+      const tabPulseSinusTotal = [ 2, 
+        61,43,33,25,40,33,57,37,11,20, 55,25,23,57,40,25,53,61,21, 5, 
+        19,59,61,25, 8,23,37,25,31,20, 29,47,61,59,40,25,27,29,59, 5, 
+        61,19,51,59,40,37,17,25,51, 4, 51,25,17,37,40,59,51,19,61, 5, 
+        59,29,27,25,40,59,61,47,29,20, 31,25,37,23, 8,25,61,59,19, 5, 
+        21,61,53,25,40,57,23,25,55,20, 11,37,57,33,40,25,33,43,61, 2
+      ];
+
+      const tabPulseSinusOn = [ 0, 
+        1, 1, 1, 1, 2, 2, 4, 3, 1, 2,   6, 3, 3, 8, 6, 4, 9,11, 4, 1, 
+        4,13,14, 6, 2, 6,10, 7, 9, 6,   9,15,20,20,14, 9,10,11,23, 2, 
+        25, 8,22,26,18,17, 8,12,25, 2,  26,13, 9,20,22,33,29,11,36, 3, 
+        36,18,17,16,26,39,41,32,20,14,  22,18,27,17, 6,19,47,46,15, 4, 
+        17,50,44,21,34,49,20,22,49,18,  10,34,53,31,38,24,32,42,60, 2
+      ];
+
+      function calculerLongueurTrame(mode, pourcentage) {
+        if (mode === "decoupe") {
+          return 20; // Toujours 1 période de 20ms
+        }
+        
+        if (mode === "demi") {
+         if (pourcentage === 0) return 0;
+         // return Math.round((100 * 10 / pourcentage));
+        return 10
+            
+        }
+        
+        if (mode === "multi") {
+          const PulseTotal = tabPulseSinusTotal[pourcentage];
+          return PulseTotal * 10; // Nombre de périodes * 20ms
+        }
+        
+        if (mode === "train") {
+          return 1000; // Toujours 1000ms (1 seconde)
+        }
+        
+        return 0;
+      }
+
+      function genererSignal(mode, pourcentage, nbPoints) {
+        const signal = [];
+
+        if (mode === "decoupe") {
+          const retard = 20 - pourcentage / 5;
+          for (let t = 0; t < 2000; t++) {
+            if (t % 20 < retard) {
+              signal[t] = 0;
+            } else {
+              const phi = Math.PI * 2 * 50 * t /2000;
+              signal[t] = Math.sin(phi);
+            }
+          }
+        }
+
+        if (mode === "demi") {
+          let Phase = 0;
+          let Plot = false;
+          let last_signe = false;
+          for (let t = 0; t < 2000; t++) {
+            const phi = Math.PI * 2 * 50 * t / 2000;
+            if (t % 20 === 0) {
+              const phi2 = Math.PI * 2 * 50 * (t + 10) / 2000;
+              const signe = Math.sin(phi2) > 0;
+              Phase += pourcentage;
+              if (Phase >= 99 && last_signe !== signe) {
+                Plot = true;
+                Phase -= 100;
+                last_signe = signe;
+              } else {
+                Plot = false;
+              }
+            }
+            signal[t] = Plot ? Math.sin(phi) : 0;
+          }
+        }
+
+        if (mode === "multi") {
+          let PulseComptage = 0;
+          const PulseOn = tabPulseSinusOn[pourcentage];
+          const PulseTotal = tabPulseSinusTotal[pourcentage];
+          for (let t = 0; t < 2000; t++) {
+            if (PulseComptage < PulseOn) {
+              const phi = Math.PI * 2 * 50 * t / 2000;
+              signal[t] = Math.sin(phi);
+            } else {
+              signal[t] = 0;
+            }
+            if (t % 20 === 0) {
+              PulseComptage++;
+              if (PulseComptage >= PulseTotal) PulseComptage = 0;
+            }
+          }
+        }
+
+        if (mode === "train") {
+          for (let t = 0; t < 2000; t++) {
+            if (t > pourcentage * 20) {
+              signal[t] = 0;
+            } else {
+              const phi = Math.PI * 2 * 50 * t / 2000;
+              signal[t] = Math.sin(phi);
+            }
+          }
+        }
+
+        return signal;
+      }
+
+      function tracerGraphe(divId, signal, duree, nbPoints) {
+        const div = document.querySelector(divId);
+        const H = div.clientHeight;
+        const W = div.clientWidth;
+
+        let svg = `<svg height="${H}" width="${W}">`;
+        svg += `<line x1="0" y1="${H * 0.9}" x2="${W}" y2="${H * 0.9}" style="stroke:white;stroke-width:1" />`;
+        svg += `<polyline points="`;
+        
+        for (let t = 0; t < nbPoints; t++) {
+          const Y = H * (0.45 - 0.43 * signal[t]);
+          const X = W * t / nbPoints;
+          svg += `${X},${Y} `;
+        }
+        svg += `" style="fill:none;stroke:yellow;stroke-width:1" />`;
+
+        // Graduation temporelle
+        const intervalleGrad = duree >= 500 ? 100 : 50;
+        const pasGrad = intervalleGrad * nbPoints / duree;
+        
+        for (let t = 0; t < nbPoints; t += pasGrad) {
+          const X = W * t / nbPoints;
+          const X3 = W * (t + 4) / nbPoints;
+          const Y = H * 0.9;
+          const Y2 = H * 0.95;
+          const Y3 = H * 0.99;
+          const T = Math.round(t * duree / nbPoints);
+          svg += `<line x1="${X}" y1="${Y2}" x2="${X}" y2="${Y}" style="stroke:white;stroke-width:1" />`;
+          svg += `<text x="${X3}" y="${Y3}" fill="white">${T}</text>`;
+        }
+        
+        const X3 = W * 980 / 1000;
+        const Y3 = H * 0.99;
+        svg += `<text x="${X3}" y="${Y3}" fill="white">ms</text></svg>`;
+        div.innerHTML = svg;
+      }
+
+      function trace() {
+        const curseurOuverture = document.querySelector("#curseurOuverture");
+        const curseurDuree = document.querySelector("#curseurDuree");
+        const percentOuverture = document.querySelector("#percentOuverture");
+        const valueDuree = document.querySelector("#valueDuree");
+
+        const pourcentage = parseInt(curseurOuverture.value);
+        const duree = parseInt(curseurDuree.value);
+        
+        percentOuverture.textContent = pourcentage;
+        valueDuree.textContent = duree;
+
+        // Nombre de points proportionnel à la durée (2 points par ms pour 50Hz)
+        const nbPoints = duree * 2;
+
+        // Générer et tracer les 4 graphiques
+        const modes = [
+          { nom: "decoupe", div: "#Decoupe", trame: "#trameDecoupe" },
+          { nom: "demi", div: "#Demi", trame: "#trameDemi" },
+          { nom: "multi", div: "#Multi", trame: "#trameMulti" },
+          { nom: "train", div: "#Train", trame: "#trameTrain" }
+        ];
+
+        modes.forEach(mode => {
+          const signal = genererSignal(mode.nom, pourcentage, nbPoints);
+          tracerGraphe(mode.div, signal, duree, nbPoints);
+          
+          // Afficher la longueur de trame
+          const longueurTrame = calculerLongueurTrame(mode.nom, pourcentage);
+          const trameSpan = document.querySelector(mode.trame);
+          trameSpan.textContent = `(Trame: ${longueurTrame} ms)`;
+        });
+      }
+
+      // Gestionnaires des boutons +/-
+      document.addEventListener('DOMContentLoaded', function() {
+        const curseurOuverture = document.querySelector("#curseurOuverture");
+        const curseurDuree = document.querySelector("#curseurDuree");
+        
+        // Boutons Ouverture
+        document.getElementById('btnOuverturePlus').addEventListener('click', function() {
+          let val = parseInt(curseurOuverture.value);
+          if (val < 100) {
+            curseurOuverture.value = val + 1;
+            trace();
+          }
+        });
+        
+        document.getElementById('btnOuvertureMinus').addEventListener('click', function() {
+          let val = parseInt(curseurOuverture.value);
+          if (val > 0) {
+            curseurOuverture.value = val - 1;
+            trace();
+          }
+        });
+        
+        // Boutons Durée
+        document.getElementById('btnDureePlus').addEventListener('click', function() {
+          let val = parseInt(curseurDuree.value);
+          if (val < 1000) {
+            curseurDuree.value = val + 50;
+            trace();
+          }
+        });
+        
+        document.getElementById('btnDureeMinus').addEventListener('click', function() {
+          let val = parseInt(curseurDuree.value);
+          if (val > 100) {
+            curseurDuree.value = val - 50;
+            trace();
+          }
+        });
+      });
+    </script>
+  </body>
+</html>
